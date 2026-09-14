@@ -1,0 +1,5 @@
+.pio/
+.vscode/
+__pycache__/
+*.pyc
+firmware-flash-at-0x0.bin
