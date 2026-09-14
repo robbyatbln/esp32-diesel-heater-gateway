@@ -1,4 +1,6 @@
-## v0.4.0 – Firmware-Updates im Webinterface
+## v0.4.1 – Firmware-Updates im Webinterface
+
+Upload-Sitzungen werden auch nach hartem Verbindungsabbruch sofort vollständig freigegeben. Eine neue Übertragung kann direkt beginnen.
 
 - Neue Update-Seite mit gezielter GitHub-Release-Suche.
 - Versionsvergleich, Versionshinweise und Installation nach Bestätigung.

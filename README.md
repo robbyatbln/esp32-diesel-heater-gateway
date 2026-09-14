@@ -1,4 +1,4 @@
-# Diesel Heater Gateway · v0.4.0
+# Diesel Heater Gateway · v0.4.1
 
 Lokales Gateway für **Seeed Studio XIAO ESP32-S3**: deutsche Weboberfläche, WLAN- und Bluetooth-Suche, MQTT/Home Assistant und Firmware-Updates im Browser.
 
