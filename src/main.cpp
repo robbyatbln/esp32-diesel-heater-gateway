@@ -11,7 +11,7 @@
 #include "mqtt_gateway.h"
 #include "firmware_update.h"
 
-constexpr char VERSION[] = "0.4.0";
+constexpr char VERSION[] = "0.4.1";
 WebServer web(80);
 DNSServer dns;
 Preferences prefs;

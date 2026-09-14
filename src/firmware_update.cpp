@@ -39,7 +39,7 @@ bool authorized() {
 void abortUpdate(const String& reason) {
   if(handle){esp_ota_abort(handle);handle=0;}
   if(hashOpen){mbedtls_sha256_free(&hash);hashOpen=false;}
-  active=false;session="";lastError=reason;
+  active=false;session="";lastError=reason;seenFile=false;chunkAccepted=false;
 }
 void infoResponse() {
   JsonDocument d;firmwareUpdateInfo(d.to<JsonObject>());String body;serializeJson(d,body);
@@ -110,7 +110,7 @@ void firmwareUpdateSetup(WebServer& web,const String& token) {
     if(!decimal(server->arg("size"),size)||size<1024||!partition||size>partition->size||!hex){reply(400,"Firmwaregröße oder Prüfsumme ungültig.");return;}
     // Sequential erasure avoids blocking the web handler for the whole slot.
     if(esp_ota_begin(partition,OTA_WITH_SEQUENTIAL_WRITES,&handle)!=ESP_OK){handle=0;reply(500,"Update-Speicher konnte nicht geöffnet werden.");return;}
-    expected=size;expectedHash=checksum;received=0;markerFound=false;markerPosition=0;lastError="";
+    expected=size;expectedHash=checksum;received=0;markerFound=false;markerPosition=0;lastError="";seenFile=false;chunkAccepted=false;
     mbedtls_sha256_init(&hash);mbedtls_sha256_starts_ret(&hash,0);hashOpen=true;
     char id[33];snprintf(id,sizeof(id),"%08lx%08lx%08lx%08lx",(unsigned long)esp_random(),(unsigned long)esp_random(),(unsigned long)esp_random(),(unsigned long)esp_random());session=id;
     active=true;touched=millis();logEvent("Firmware-Übertragung gestartet.");
