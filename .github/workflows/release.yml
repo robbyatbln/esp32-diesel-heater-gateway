@@ -31,4 +31,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" firmware-app-at-0x10000.bin update-manifest.json --verify-tag --title "Diesel Heater Gateway $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already published; leaving it unchanged."
+          else
+            gh release create "$RELEASE_TAG" firmware-app-at-0x10000.bin update-manifest.json --verify-tag --title "Diesel Heater Gateway $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          fi
