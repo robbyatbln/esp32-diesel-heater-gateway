@@ -1,0 +1,23 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const html=fs.readFileSync(path.join(__dirname,'../src/web_ui.h'),'utf8');
+const script=html.split('<script>')[1].split('</script>')[0];
+const nodes={};
+for(const m of html.matchAll(/id="([^"]+)"/g))nodes[m[1]]={disabled:false,textContent:'',classList:{toggle(){}},setAttribute(){}};
+const $=id=>{assert.ok(nodes[id],`Missing UI element ${id}`);return nodes[id];};
+const context={$,text:(id,v)=>$(id).textContent=v,online:true,working:false,updateWorking:false,demo:false,state:null};
+vm.createContext(context);
+vm.runInContext(script.slice(script.indexOf('function commandMessage'),script.indexOf("$('demo-toggle').onchange")),context);
+function render(h={}){context.state={selected:'test',heater:h};vm.runInContext('renderHeater()',context);}
+render();assert.equal($('power').disabled,true);assert.equal($('room-temp').textContent,'—');
+const state={mode:'heat',operating_mode:'temperature',room_temperature:18.7,case_temperature:120,voltage:12.4,target_temperature:21,level:4};
+const heater={available:true,controlsReady:true,linked:true,pinSet:true,state,age:1};
+render(heater);assert.equal($('power').disabled,false);assert.equal($('power').textContent,'Heizung ausschalten');
+assert.equal($('room-temp').textContent,'18,7');assert.equal($('mode-fan').disabled,true);
+render({...heater,controlsReady:false,pending:true,result:'sent_awaiting_confirmation'});assert.equal($('plus').disabled,true);assert.match($('control-info').textContent,/warte/);
+render({...heater,available:false,controlsReady:false});assert.equal($('room-temp').textContent,'—');assert.equal($('power').disabled,true);
+render({...heater,state:{...state,cooldown:true,mode:'off'}});assert.equal($('power').disabled,true);
+render({...heater,ventilationSupported:true,state:{...state,mode:'off'}});assert.equal($('mode-fan').disabled,false);
+render({...heater,state:{...state,mode:'fan_only',operating_mode:'ventilation'}});assert.equal($('power').disabled,true);assert.equal($('plus').disabled,true);
+render({...heater,state:{...state,target_temperature:null}});assert.equal($('setpoint').textContent,'—');assert.equal($('plus').disabled,true);
+context.online=false;render(heater);assert.equal($('power').disabled,true);assert.equal($('room-temp').textContent,'—');
+console.log('PASS: live UI, stale data, pending command, cooldown, ventilation and missing values');
