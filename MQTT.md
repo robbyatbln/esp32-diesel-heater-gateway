@@ -17,7 +17,7 @@ Basis: `dieselheater/<MAC ohne Doppelpunkte>`; Client-ID: `dieselheater_<MAC ohn
 | `/availability` | `online` / `offline`; Last Will bei unerwartetem Abbruch | ja |
 | `/state` | Gateway-JSON: version, uptime, wifi_signal, free_heap, heater_connected, driver_ready | ja |
 | `/heater/availability` | derzeit immer `offline` | ja |
-| `/heater/state` | für spätere, bestätigte Heizungswerte reserviert; derzeit keine Veröffentlichung | — |
+| `/heater/state` | Live-Heizungswerte; `{}` ohne gültigen Status | ja |
 | `/result` | JSON mit command, ok, error, uptime | nein |
 
 Bei regulärem Neustart wird `offline` gesendet. Beim Konfigurationswechsel wartet die Firmware begrenzt auf ausstehende Bestätigungen, bevor sie die Verbindung wechselt. Ein nicht erreichbarer Broker kann eine saubere Entfernung alter HA-Konfigurationen verhindern; dann weist das Ereignisprotokoll darauf hin.
@@ -31,16 +31,16 @@ Befehle an `<Basis>/command/<Name>` veröffentlichen. Keine retained Befehle ver
 | `refresh` | `PRESS` | Gateway-Status senden |
 | `restart` | `PRESS` | Gateway neu starten; bei laufender Funksuche abgewiesen |
 | `scan` | `PRESS` | Bluetooth-Suche starten; bei laufender Funksuche abgewiesen |
-| `power` | `ON` / `OFF` | validiert, dann `heater_driver_unavailable` |
-| `mode` | `heat` / `off` | validiert, dann `heater_driver_unavailable` |
-| `temperature` | ganze Zahl 8–35 | validiert, dann `heater_driver_unavailable` |
-| `level` | ganze Zahl 1–10 | validiert, dann `heater_driver_unavailable` |
-| `operating_mode` | `temperature` / `level` | validiert, dann `heater_driver_unavailable` |
+| `power` | `ON` / `OFF` | über gemeinsamen Bluetooth-Treiber; ohne Status abgewiesen |
+| `mode` | `heat` / `off` | über gemeinsamen Bluetooth-Treiber; ohne Status abgewiesen |
+| `temperature` | ganze Zahl 8–35 | über gemeinsamen Bluetooth-Treiber; ohne Status abgewiesen |
+| `level` | ganze Zahl 1–10 | über gemeinsamen Bluetooth-Treiber; ohne Status abgewiesen |
+| `operating_mode` | `temperature` / `level` | über gemeinsamen Bluetooth-Treiber; ohne Status abgewiesen |
 
 Antwortbeispiel auf `/result`:
 
 ```json
-{"command":"power","ok":false,"error":"heater_driver_unavailable","uptime":42}
+{"command":"power","ok":false,"error":"heater_state_unavailable","uptime":42}
 ```
 
 Weitere Rückmeldungen: `invalid_payload`, `unknown_command`, `retained_command_rejected`, `duplicate_command_ignored`, `radio_busy`. Nachrichten während eines Konfigurationswechsels können verworfen werden; danach erneut senden. Überlange oder nicht vollständig empfangene Nachrichten werden nicht ausgeführt und erhöhen den Verworfen-Zähler. Es gibt keine automatische Erfolgsmeldung für eine physisch nicht bestätigte Heizungsaktion.
@@ -62,7 +62,7 @@ Retained Konfigurationen unter `homeassistant/<Komponente>/<Client-ID>/<Entität
 11. Versorgungsspannung
 12. Gehäusetemperatur
 
-Gateway-Diagnose und Tasten sind verfügbar, sobald das Gateway verbunden ist. Heizungsregler und Heizungsmesswerte verlangen zusätzlich `heater/availability = online` und bleiben daher in v0.4.0 nicht verfügbar. Regler arbeiten nicht optimistisch. Die derzeit reservierten Temperatur- und Leistungsgrenzen müssen später mit dem realen Protokoll abgeglichen werden.
+Gateway-Diagnose und Tasten sind verfügbar, sobald das Gateway verbunden ist. Heizungsregler und Heizungsmesswerte verlangen zusätzlich `heater/availability = online` und bleiben ohne aktuelle Heizungsantwort nicht verfügbar. Regler arbeiten nicht optimistisch. Der gemeinsame Bedienbereich beträgt 8–35 °C und Stufe 1–10.
 
 Discovery erfolgt nach Verbindung, auf `homeassistant/status = online`, nach Änderung des Anzeigenamens und über die Taste „Discovery senden“. Eine kurze zufällige Verzögerung und versetzte Veröffentlichungen verteilen die Nachrichten. Nach Discovery werden Zustandsmeldungen erneuert.
 
@@ -72,14 +72,12 @@ MQTT Discovery richtet Entitäten ein, aber weder den Broker noch die HA-MQTT-In
 
 ## Erweiterung um die echte Heizung
 
-`gatewayHeaterCommand()` in `src/main.cpp` ist der bewusst noch nicht aktive Anschluss für den späteren BLE-Treiber. Der Treiber muss Befehle umsetzen und tatsächliche Zustandsrückmeldungen liefern. Erst dann dürfen Heizungs-Verfügbarkeit und echte Werte veröffentlicht werden. Die Web-Demo ist davon unabhängig und kann diese Rückmeldungen nicht erzeugen.
+`gatewayHeaterCommand()` verwendet denselben Treiber wie die Weboberfläche. `/result` meldet die Annahme (`status: accepted`) oder Ablehnung. Dies bestätigt noch keine physische Änderung. Das zusätzliche, nicht retained Topic `/heater/result` meldet `sent_awaiting_confirmation`, `confirmed`, `not_confirmed_no_retry` oder einen Treiberfehler. Der letzte Befehlsstatus steht außerdem in `/heater/state` als `command_result`. Heizungswerte werden nur aus empfangener Telemetrie veröffentlicht; bei Verlust der Verfügbarkeit wird retained `{}` gesendet, um alte Werte zu entfernen.
 
-## Lüftungsmodus ab v0.3.1
+## Lüften
 
-Zusätzliche gültige Befehle, jeweils ohne Retain:
-- `<basis>/command/mode`: `fan_only`
-- `<basis>/command/operating_mode`: `ventilation`
+`mode = fan_only` und `operating_mode = ventilation` starten Lüften bei ausgewähltem ABBA-Profil ausschließlich aus Aus/Standby. Discovery ergänzt dafür die bestehenden IDs um diese Optionen. **Das Beenden erfolgt derzeit am Originalbedienteil.** Die Vorlage enthält keinen eindeutig bestätigten separaten Lüften-Stoppbefehl. Während Lüften werden Änderungen gesperrt. Für andere Profile bleiben Lüftungsbefehle gesperrt.
 
-Beide werden zentral auf Geräteunterstützung geprüft. Aktuell lautet das Ergebnis `ok: false`, `error: ventilation_not_supported`. Bei bestätigter Unterstützung ergänzt Discovery das vorhandene Climate um `fan_only` und die vorhandene Betriebsart-Auswahl um `ventilation`; IDs bleiben gleich. Der spätere Treiber muss im tatsächlichen Lüftungsbetrieb `mode: fan_only`, `operating_mode: ventilation`, `action: fan` zurückmelden. Er muss auch geeignete Lüfterstufen und Übergänge aus laufendem Heizbetrieb gerätespezifisch umsetzen. Diese Hardware-Funktionen sind noch nicht implementiert.
+## Profile und Verbindungen
 
-Während eines Firmware-Updates werden Heizungs-, Neustart- und Scan-Befehle mit `update_in_progress` abgewiesen. Statusmeldungen können weiterlaufen.
+Profil, PIN und Verbindung werden in der Weboberfläche eingestellt. Nach Neustart oder Funkverlust manuell neu verbinden. MQTT verbindet sich selbst zum Broker zurück, stellt aber keine unterbrochene Heizungssteuerung wieder her und spielt keine Befehle nach. Siehe [PROTOCOLS.md](PROTOCOLS.md) für profilabhängige Einschränkungen.

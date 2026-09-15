@@ -1,19 +1,21 @@
-# Diesel Heater Gateway · v0.4.1
+# Diesel Heater Gateway · v0.5.0
 
 Lokales Gateway für **Seeed Studio XIAO ESP32-S3**: deutsche Weboberfläche, WLAN- und Bluetooth-Suche, MQTT/Home Assistant und Firmware-Updates im Browser.
 
-**Status:** Gateway, Oberfläche, MQTT und Firmware-Updates funktionieren. Echte Bluetooth-Verbindung, Messwerte und Steuerung der Heizung benötigen noch einen passenden, am Gerät geprüften Treiber. Ein gespeichertes Bluetooth-Gerät ist noch nicht verbunden. Die Demo sendet keine Heizungsbefehle oder MQTT-Messwerte.
+**Status:** Acht Protokollprofile mit Bluetooth-Verbindung, PIN, Live-Anzeige und gemeinsamer Web-/MQTT-Steuerung sind implementiert. Die konkrete Heizung wurde noch nicht physisch getestet. Eine gespeicherte Auswahl verbindet noch nicht; die Demo sendet keine Heizungsbefehle oder MQTT-Messwerte.
 
 ## Funktionen
 
+**Entwicklungsstand der Protokolle:** AA55/AA66 (jeweils Klartext und verschlüsselt), ABBA, CBFF und Hcalory MVP1/MVP2 liegen jetzt als C++-Protokollmodul mit Referenztests vor. Die Verbindungsschicht läuft im Hintergrund. Nach Neustart oder Verbindungsabbruch wird bewusst manuell neu verbunden; Schaltbefehle werden nicht automatisch wiederholt. Umfang und Grenzen: [PROTOCOLS.md](PROTOCOLS.md).
+
 | Bereich | Funktionen und Grenzen |
 | --- | --- |
-| Übersicht | Verbindungen, Status, responsive Oberfläche und ausdrücklich markierte Demo für Temperatur, Leistung und Lüften; echte Heizungswerte bleiben ohne Treiber leer |
+| Übersicht | Verbindungen, Status, responsive Oberfläche und ausdrücklich markierte Demo für Temperatur, Leistung und Lüften; echte Werte erscheinen erst nach gültiger Heizungsantwort |
 | Bluetooth | Etwa acht Sekunden Suche, maximal 80 Geräte, Namen/Adressen/Service-UUIDs, Signalstärke, Heizungsfilter, Auswahl speichern/löschen; UUIDs sind nur Protokollhinweise |
 | WLAN | 2,4-GHz-Suche, Zugangsdaten speichern, Passwort beibehalten, automatische Wiederverbindung, Setup-Hotspot; kein 5 GHz |
 | MQTT | Broker/Port/Benutzer/Passwort, Sendeintervall, Hintergrundverbindung, Status, Befehle und ehrliche Rückmeldungen; TCP ohne TLS |
-| Home Assistant | 12 Discovery-Einträge mit stabilen IDs, Verfügbarkeit und erneuter Anmeldung nach HA-Neustart; Heizungsregler bleiben ohne Treiber unavailable |
-| Lüften | Eigener Demo-Modus und MQTT-Befehle vorbereitet; echte Nutzung erst bei bestätigter Geräteunterstützung |
+| Home Assistant | 12 Discovery-Einträge mit stabilen IDs, Verfügbarkeit und erneuter Anmeldung nach HA-Neustart; Heizungsregler bleiben ohne aktuelle Heizungsantwort unavailable |
+| Lüften | Eigener Demo-Modus und MQTT-Befehle vorbereitet; ABBA-Lüften aus Aus/Standby; Beenden am Originalbedienteil, übrige Profile gesperrt |
 | Updates | Gezielte Suche nach stabilen GitHub-Releases, Versionshinweise, Installation nach Bestätigung, lokaler .bin-Upload, Fortschritt und Neustartkontrolle |
 | System | Anzeigename, Laufzeit, Speicher, Ereignisse, Diagnose-Download, Neustart |
 
@@ -25,6 +27,19 @@ Ohne gespeichertes WLAN startet **DieselHeater-Setup**, Passwort **dieselheater*
 
 Der Setup-Hotspot startet nach etwa 30 Sekunden ohne WLAN und schaltet sich eine Minute nach erfolgreicher Verbindung aus. WLAN- und Bluetooth-Suchen laufen nacheinander. Geräteauswahl und Einstellungen bleiben bei Neustarts und App-Updates gespeichert.
 
+## Heizung verbinden
+
+1. Hersteller-App schließen und unter **Bluetooth-Geräte** nach der Heizung suchen.
+2. Das eigene Steuergerät auswählen. Ein Wechsel des Geräts löscht die bisherige Profil-/PIN-Zuordnung.
+3. Das passende Protokoll wählen, die vierstellige Geräte-PIN eingeben und **Profil & PIN speichern** drücken. Die Service-UUID allein bestimmt das Profil nicht eindeutig.
+4. **Verbinden** drücken. Dabei werden ausschließlich Anmeldung und Statusabfragen gesendet. MVP2 verwendet dabei die lokale Uhrzeit des Browsers.
+5. Erst bei **Live-Status empfangen** werden Messwerte und Regler freigegeben. Bei ausbleibender oder veralteter Antwort bleibt die Steuerung gesperrt.
+6. Temperatur-/Leistungsmodus zuerst wählen und seine Bestätigung abwarten. Anschließend den Sollwert ändern. Der gemeinsame Bereich der Oberfläche ist 8–35 °C bzw. Stufe 1–10.
+
+Ein Befehl durchläuft „angenommen“, „gesendet“ und gegebenenfalls „bestätigt“. Nach zehn Sekunden ohne passende Rückmeldung erscheint „nicht bestätigt“; es gibt keinen automatischen Wiederholungsversuch. Bei CBFF müssen Änderungen von Sollwert/Betriebsart aus ausgeschaltetem Zustand zunächst durch bewusstes Einschalten vorbereitet werden, weil der Datenbefehl selbst einschaltet. Fahrenheit-Sollwerte sind derzeit nur für Hcalory freigegeben; andere Geräte dafür zunächst auf Celsius stellen.
+
+Vor Firmware-Update, Suche, Gerätewechsel oder Neustart die Bluetooth-Verbindung mit **Trennen** schließen. Das trennt die Funkverbindung und ist **kein Ausschalten der Heizung**. Kein automatisches Wiederverbinden nach Neustart oder Funkverlust. Der erste echte Gerätetest steht weiterhin aus.
+
 ## MQTT und Home Assistant
 
 1. Broker bereitstellen, beispielsweise Mosquitto, und Home Assistant damit verbinden.
@@ -35,13 +50,13 @@ Der Setup-Hotspot startet nach etwa 30 Sekunden ohne WLAN und schaltet sich eine
 
 Die zwölf Einträge: WLAN-Signal, Laufzeit, freier Speicher, Heizungsverbindung, Status aktualisieren, Neustart, Thermostat, Leistungsstufe, Betriebsart, Raumtemperatur, Versorgungsspannung und Gehäusetemperatur.
 
-Gateway-Status und Service-Befehle funktionieren. Heizungsbefehle werden geprüft und ohne Treiber abgewiesen. Feste Basis `dieselheater/<Geräte-ID>`; QoS 1 für Status und Discovery, retained Verfügbarkeit mit Last Will. Sendeintervall 10–300 Sekunden, Standard 30. Discovery aus entfernt bei erreichbarem Broker die Konfigurationen; wieder an verwendet dieselben IDs. TLS und benutzerdefinierte Topics sind nicht implementiert. Alle Topics und Payloads: [MQTT.md](MQTT.md).
+Gateway-Status und Service-Befehle funktionieren. Heizungsbefehle werden über denselben Treiber wie die Weboberfläche abgewickelt. Ohne aktuelle Heizungsantwort werden sie abgewiesen. Annahme und Rücklesebestätigung sind getrennte Meldungen. Feste Basis `dieselheater/<Geräte-ID>`; QoS 1 für Status und Discovery, retained Verfügbarkeit mit Last Will. Sendeintervall 10–300 Sekunden, Standard 30. Discovery aus entfernt bei erreichbarem Broker die Konfigurationen; wieder an verwendet dieselben IDs. TLS und benutzerdefinierte Topics sind nicht implementiert. Alle Topics und Payloads: [MQTT.md](MQTT.md).
 
 ## Lüften ohne Heizen
 
 Die Demo zeigt **Lüften** mit einer beispielhaften Lüfterstufe. MQTT akzeptiert `command/mode = fan_only` und `command/operating_mode = ventilation`; ohne bestätigte Unterstützung lautet die Antwort `ventilation_not_supported`.
 
-Home Assistant bekommt die Option erst, wenn ein geprüfter Treiber `gatewaySupportsVentilation()` aktiviert. Diese Funktion liefert aktuell false. Lüfterstufen und Übergänge aus laufendem Heizbetrieb sind gerätespezifisch. Es werden keine unbekannten Bluetooth-Befehle ausprobiert.
+Home Assistant erhält die Lüftungsoption bei ausgewähltem ABBA-Profil. Lüften lässt sich nur aus fehlerfreiem Aus/Standby starten. **Beenden muss derzeit am Originalbedienteil erfolgen**, da die Vorlage keinen eindeutigen separaten Stoppbefehl dafür liefert. Änderungen während des Lüftens sind gesperrt. Hcalory- und CBFF-Lüftungsbefehle bleiben wegen unbestätigter bzw. widersprüchlicher Implementierung in der Vorlage gesperrt.
 
 ## Updates aus GitHub
 
@@ -86,7 +101,9 @@ Manuell ist dasselbe über GitHub Releases möglich: Tag auf den vorbereiteten C
 
 ## Projektaufbau
 
-- `src/main.cpp`: WLAN, BLE-Suche, Web-API und noch offener Treiberanschluss.
+- `src/main.cpp`: WLAN, BLE-Suche, Web-API und gemeinsamer Treiberanschluss.
+- `src/heater_gateway.*`: BLE-Verbindung, Anmeldung, Queues, Status und Befehlsbestätigung.
+- `src/heater_protocol.*`, `src/heater_control.*`: Protokollformate und geprüfte Steuerungsregeln.
 - `src/web_ui.h`: vollständige lokale Oberfläche ohne externe Schriftarten oder JavaScript-Bibliotheken.
 - `src/mqtt_gateway.*`: MQTT, Discovery, Konfiguration und Befehlsprüfung.
 - `src/firmware_update.*`: OTA-Sitzungen, Übertragung, Prüfung, Aktivierung.

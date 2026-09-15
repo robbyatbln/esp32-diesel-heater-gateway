@@ -3,8 +3,8 @@
   "project": "diesel-heater-gateway",
   "target": "xiao_esp32s3",
   "firmwareId": "DIESELHEATER_GATEWAY:XIAO_ESP32S3:OTA1",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "file": "firmware-app-at-0x10000.bin",
-  "size": 1201744,
-  "sha256": "466a3486850ce321c97752790ac3d77fbd4fb63512aaeaa6c838d9b670645380"
+  "size": 1239456,
+  "sha256": "72c59a75a17091b85d0d82d749cd06dc584958bd64b637175efaa784d02d9e49"
 }
