@@ -15,4 +15,11 @@ jobs:
           node-version: '22'
       - run: pip install platformio==6.1.19
       - run: node tests/update.test.cjs
+      - run: node tests/heater_ui.test.cjs
+      - name: Native protocol comparison
+        run: |
+          g++ -std=c++11 -Wall -Wextra -Werror -Isrc src/heater_protocol.cpp tests/protocol_runner.cpp -o /tmp/protocol_runner
+          python tests/protocol_test.py /tmp/protocol_runner
+          g++ -std=c++11 -Wall -Wextra -Werror -Isrc src/heater_control.cpp tests/control_test.cpp -o /tmp/control_test
+          /tmp/control_test
       - run: pio run
