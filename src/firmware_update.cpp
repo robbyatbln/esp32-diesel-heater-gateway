@@ -1,4 +1,5 @@
 #include "firmware_update.h"
+#include "heater_gateway.h"
 #include <Preferences.h>
 #include <esp_ota_ops.h>
 #include <esp_image_format.h>
@@ -103,7 +104,7 @@ void firmwareUpdateSetup(WebServer& web,const String& token) {
   });
   web.on("/api/update/start",HTTP_POST,[]{
     if(!authorized())return;
-    if(firmwareUpdateBusy()||scanning||wifiScanning||rebootAt){reply(409,"Gateway ist beschäftigt. Bitte kurz warten.");return;}
+    if(firmwareUpdateBusy()||scanning||wifiScanning||rebootAt||heaterRadioBusy()){reply(409,"Bitte zuerst die Heizungsverbindung trennen und laufende Suchen abwarten.");return;}
     size_t size=0;String checksum=server->arg("sha256");checksum.toLowerCase();
     partition=esp_ota_get_next_update_partition(nullptr);
     bool hex=checksum.length()==64;for(char c:checksum)if(!isxdigit((unsigned char)c))hex=false;

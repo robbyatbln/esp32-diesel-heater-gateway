@@ -10,8 +10,9 @@
 #include "web_ui.h"
 #include "mqtt_gateway.h"
 #include "firmware_update.h"
+#include "heater_gateway.h"
 
-constexpr char VERSION[] = "0.4.1";
+constexpr char VERSION[] = "0.5.0";
 WebServer web(80);
 DNSServer dns;
 Preferences prefs;
@@ -50,8 +51,8 @@ bool allowed() {
   return false;
 }
 bool radioBusy() {
-  if(!scanning&&!wifiScanning) return false;
-  web.send(409,"text/plain; charset=utf-8","Bitte die laufende Suche abwarten.");
+  if(!scanning&&!wifiScanning&&!heaterRadioBusy()) return false;
+  web.send(409,"text/plain; charset=utf-8","Bitte Suche abwarten oder die Heizungsverbindung zuerst trennen.");
   return true;
 }
 void startAP() {
@@ -67,24 +68,23 @@ class ScanCallbacks:public NimBLEScanCallbacks {
   void onScanEnd(const NimBLEScanResults&, int) override { scanDone=true; }
 } scanCallbacks;
 bool beginScan() {
-  if(scanning||wifiScanning||firmwareUpdateBusy()) return false;
+  if(scanning||wifiScanning||firmwareUpdateBusy()||heaterRadioBusy()) return false;
   scanner->clearResults();scanning=true;scanDone=false;
   if(!scanner->start(8000,false,true)) { scanning=false; return false; }
   logEvent("Bluetooth-Suche gestartet.");return true;
 }
-bool gatewaySupportsVentilation() { return false; } // Enable only in a verified heater driver.
+bool gatewaySupportsVentilation() { return heaterVentilationSupported(); }
 bool gatewayHeaterCommand(const String& command,const String& value,String& error) {
   if(firmwareUpdateBusy()){error="update_in_progress";return false;}
   if ((command=="mode" && value=="fan_only") || (command=="operating_mode" && value=="ventilation")) {
     if (!gatewaySupportsVentilation()) { error="ventilation_not_supported"; return false; }
   }
-  // Replace this only after a BLE protocol driver can confirm actual state changes.
-  error="heater_driver_unavailable";
-  return false;
+  if(scanning||wifiScanning){error="radio_busy";return false;}
+  return heaterCommand(command,value,error);
 }
 bool gatewayServiceCommand(const String& command,String& error) {
   if(firmwareUpdateBusy()){error="update_in_progress";return false;}
-  if(scanning||wifiScanning){error="radio_busy";return false;}
+  if(scanning||wifiScanning||heaterRadioBusy()){error="radio_busy";return false;}
   if(command=="restart"){rebootAt=millis()+1500;return true;}
   if(command=="scan"&&beginScan())return true;
   error="command_unavailable";return false;
@@ -126,8 +126,8 @@ void status(JsonDocument& d) {
   d["scanning"]=scanning;d["wifiScanning"]=wifiScanning;d["hasScan"]=hasScan;d["wifiHasScan"]=wifiHasScan;
   d["scanRevision"]=scanRevision;d["wifiRevision"]=wifiRevision;d["scanAge"]=hasScan?(millis()-lastScan)/1000:0;
   d["deviceCount"]=deviceCount;d["selected"]=selected;d["name"]=selectedName;d["hint"]=selectedHint;
-  // Saving an address does not establish a connection. No protocol driver is active yet.
-  d["heaterConnected"]=false;d["driverReady"]=false;
+  d["heaterConnected"]=heaterAvailable();d["driverReady"]=heaterControlsReady();
+  heaterInfo(d["heater"].to<JsonObject>());
   d["freeHeap"]=ESP.getFreeHeap();d["minHeap"]=ESP.getMinFreeHeap();d["psram"]=ESP.getPsramSize();
   d["uptime"]=millis()/1000;d["logSequence"]=logSequence;
   mqttInfo(d["mqtt"].to<JsonObject>());
@@ -136,6 +136,25 @@ void status(JsonDocument& d) {
 void setupRoutes() {
   const char* headers[]={"X-Gateway-Token","X-Update-Id","X-Update-Offset"};web.collectHeaders(headers,3);
   firmwareUpdateSetup(web,token);
+  web.on("/api/heater/config",HTTP_POST,[]{
+    if(!allowed()||radioBusy())return;
+    if(web.arg("reset")=="true"){heaterResetConfiguration();mqttLabelChanged();success();return;}
+    String error;
+    if(!heaterConfigure(web.arg("profile"),web.arg("pin"),web.arg("keepPin")=="true",error)){web.send(400,"text/plain; charset=utf-8",error);return;}
+    mqttLabelChanged();success();
+  });
+  web.on("/api/heater/connect",HTTP_POST,[]{
+    if(!allowed()||radioBusy())return;
+    String error;
+    if(!heaterConnect(selected,prefs.getUChar("addrType",0),web.arg("localEpoch"),error)){web.send(409,"text/plain; charset=utf-8",error);return;}
+    success(202);
+  });
+  web.on("/api/heater/disconnect",HTTP_POST,[]{if(!allowed())return;heaterDisconnect();success(202);});
+  web.on("/api/heater/command",HTTP_POST,[]{
+    if(!allowed())return;String error;
+    if(!gatewayHeaterCommand(web.arg("command"),web.arg("value"),error)){web.send(409,"text/plain; charset=utf-8",error);return;}
+    web.send(202,"application/json","{\"ok\":true,\"status\":\"queued\"}");
+  });
   web.on("/",HTTP_GET,[]{
     web.sendHeader("Cache-Control","no-store");web.sendHeader("X-Content-Type-Options","nosniff");web.sendHeader("X-Frame-Options","DENY");
     web.send_P(200,"text/html; charset=utf-8",PAGE);
@@ -189,6 +208,7 @@ void setupRoutes() {
     if(!allowed()||radioBusy()) return;
     JsonDocument d;deserializeJson(d,devices);
     for(auto v:d.as<JsonArray>()) if(web.arg("address")==v["address"].as<String>()) {
+      if(selected!=v["address"].as<String>())heaterResetConfiguration();
       selected=v["address"].as<String>();selectedName=v["name"].as<String>();selectedHint=v["hint"].as<String>();
       prefs.putString("heater",selected);prefs.putString("name",selectedName);prefs.putString("hint",selectedHint);prefs.putUChar("addrType",v["type"].as<uint8_t>());
       logEvent("Heizungsgerät gespeichert; Verbindung noch nicht geprüft.");success();return;
@@ -198,6 +218,7 @@ void setupRoutes() {
   web.on("/api/forget",HTTP_POST,[]{
     if(!allowed()||radioBusy()) return;
     selected="";selectedName="";selectedHint="";
+    heaterResetConfiguration();mqttLabelChanged();
     prefs.remove("heater");prefs.remove("name");prefs.remove("hint");prefs.remove("addrType");
     logEvent("Geräteauswahl aufgehoben.");success();
   });
@@ -237,11 +258,11 @@ void setup() {
   if(ssid.length()) WiFi.begin(ssid.c_str(),prefs.getString("pass","").c_str());else startAP();
   disconnectedAt=millis();NimBLEDevice::init("DieselHeater-Gateway");scanner=NimBLEDevice::getScan();
   scanner->setScanCallbacks(&scanCallbacks);scanner->setActiveScan(true);scanner->setInterval(160);scanner->setWindow(80);scanner->setMaxResults(80);
-  mqttSetup(VERSION);setupRoutes();logEvent("Weboberfläche bereit.");
+  NimBLEDevice::setMTU(128);heaterSetup();mqttSetup(VERSION);setupRoutes();logEvent("Weboberfläche bereit.");
 }
 void loop() {
   web.handleClient();if(ap) dns.processNextRequest();if(scanDone.exchange(false)) finishScan();
-  mqttLoop();firmwareUpdateLoop();
+  heaterLoop();mqttLoop();firmwareUpdateLoop();
   if(wifiScanning) {int result=WiFi.scanComplete();if(result!=WIFI_SCAN_RUNNING) finishWifiScan(result);}
   uint32_t now=millis();bool ok=WiFi.status()==WL_CONNECTED;
   if(ok&&!connected) {connected=true;connectedAt=now;MDNS.begin("dieselheater");MDNS.addService("http","tcp",80);logEvent("WLAN verbunden: http://"+WiFi.localIP().toString());}
